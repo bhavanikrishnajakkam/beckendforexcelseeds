@@ -94,6 +94,22 @@ app.get('/api/verify/:labelNo', async (req, res) => {
     res.status(500).json({ error: "Verification failed" });
   }
 });
+
+// DELETE PRODUCT & ASSOCIATED LABELS
+app.delete('/api/admin/product/:id', async (req, res) => {
+  try {
+    const productId = req.params.id;
+    // 1. Delete the product
+    await Product.findByIdAndDelete(productId);
+    // 2. Delete all QR labels associated with it
+    await Label.deleteMany({ productId: productId });
+    
+    res.json({ success: true, message: "Batch and labels deleted" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete batch" });
+  }
+});
+
 app.get('/api/admin/stats', async (req, res) => {
   try {
     const stats = await Product.aggregate([
@@ -105,6 +121,7 @@ app.get('/api/admin/stats', async (req, res) => {
           products: { 
             $push: { 
               // Pull the exact DB schema field names
+              id: "$_id",
               name: "$cropName", 
               variety: "$packedVariety", 
               qty: "$quantity" 
