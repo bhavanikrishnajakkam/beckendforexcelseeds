@@ -5,11 +5,12 @@ const { nanoid } = require('nanoid');
 const upload = require('./middleware/upload'); // Ensure this file exists
 require('dotenv').config();
 
+app.use(cors({ origin: '*' }));
 const Product = require('./models/Product');
 const Label = require('./models/Label');
 
 const app = express();
-app.use(cors({ origin: '*' }));
+
 app.use(express.json());
 
 // Database Connection
