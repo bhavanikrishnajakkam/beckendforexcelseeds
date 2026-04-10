@@ -39,19 +39,35 @@ app.post('/api/auth/login', async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
 // ADMIN: Generate Labels
 app.post('/api/admin/generate', upload.single('leaflet'), async (req, res) => {
   try {
-    const productData = req.body;
-    const quantity = parseInt(productData.quantity);
-    const leafletUrl = req.file.path;
+    const p = req.body;
+    
+    if (!req.file) return res.status(400).json({ error: "No PDF uploaded" });
 
-    const newProduct = await Product.create({ ...productData, leafletUrl });
+    // CRITICAL FIX: Map frontend names to exactly what your DB Model expects
+    const productToSave = {
+      cropName: p.productName || p.cropName,
+      packedVariety: p.variety || p.packedVariety,
+      packedLotNumber: p.packedLotNumber,
+      dateOfTesting: p.dateOfTesting,
+      dateOfPackaging: p.packagingDate || p.dateOfPackaging,
+      dateOfExpiry: p.dateOfExpiry,
+      mrp: p.mrp,
+      unitSalePrice: p.unitSalePrice,
+      netQty: p.netQty,
+      packedAt: p.packedAt,
+      plantAddress: p.plantAddress,
+      producedBy: p.producedBy,
+      quantity: parseInt(p.quantity),
+      leafletUrl: req.file.path
+    };
+
+    const newProduct = await Product.create(productToSave);
 
     const labelsToInsert = [];
-    for (let i = 0; i < quantity; i++) {
-      // GENERATE 12-CHAR ID USING NATIVE CRYPTO
+    for (let i = 0; i < productToSave.quantity; i++) {
       const randomId = crypto.randomBytes(6).toString('hex').toUpperCase(); 
       labelsToInsert.push({ 
         _id: randomId, 
@@ -61,8 +77,10 @@ app.post('/api/admin/generate', upload.single('leaflet'), async (req, res) => {
 
     const createdLabels = await Label.insertMany(labelsToInsert);
     res.status(201).json({ success: true, labelNumbers: createdLabels.map(l => l._id) });
+
   } catch (error) {
-    res.status(500).json({ error: "Server failed to generate labels" });
+    console.error("GENERATE ERROR:", error);
+    res.status(500).json({ error: "Server failed to save product." });
   }
 });
 
@@ -81,12 +99,14 @@ app.get('/api/admin/stats', async (req, res) => {
     const stats = await Product.aggregate([
       {
         $group: {
-          _id: "$packagingDate", // Matches the name="packagingDate" in frontend
+          // Tell MongoDB to group by the exact DB schema field name
+          _id: "$dateOfPackaging", 
           totalQuantity: { $sum: { $toInt: "$quantity" } },
           products: { 
             $push: { 
-              name: "$productName", 
-              variety: "$variety", 
+              // Pull the exact DB schema field names
+              name: "$cropName", 
+              variety: "$packedVariety", 
               qty: "$quantity" 
             } 
           }
@@ -96,9 +116,11 @@ app.get('/api/admin/stats', async (req, res) => {
     ]);
     res.json(stats);
   } catch (error) {
+    console.error("Stats Error:", error);
     res.status(500).json({ error: "Stats failed" });
   }
 });
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server on ${PORT}`));
 
