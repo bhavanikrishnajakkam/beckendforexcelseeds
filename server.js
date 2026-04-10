@@ -2,8 +2,16 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const { nanoid } = require('nanoid');
-const upload = require('./middleware/upload'); // Ensure this file exists
+const upload = require('./middleware/upload');
 require('dotenv').config();
+
+const Product = require('./models/Product');
+const Label = require('./models/Label');
+
+// 1. YOU MUST INITIALIZE 'app' BEFORE USING IT!
+const app = express();
+
+// 2. NOW APPLY CORS
 app.use(cors({
   origin: ['https://frontendforexcelseeds.vercel.app', 'http://localhost:5173'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -11,16 +19,10 @@ app.use(cors({
   credentials: true
 }));
 
-// 2. Explicitly handle the preflight OPTIONS requests for all routes
+// 3. EXPLICIT PREFLIGHT
 app.options('*', cors());
 
-
-
-const Product = require('./models/Product');
-const Label = require('./models/Label');
-
-const app = express();
-
+// 4. BODY PARSER
 app.use(express.json());
 
 // Database Connection
@@ -28,6 +30,7 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("Connected to MongoDB Atlas"))
   .catch(err => console.error("Database Connection Error:", err));
 
+// ... keep the rest of your API routes exactly the same down below ...
 // --- API ROUTES ---
 const User = require('./models/User');
 
