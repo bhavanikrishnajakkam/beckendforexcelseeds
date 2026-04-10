@@ -1,28 +1,18 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const { nanoid } = require('nanoid');
+const crypto = require('crypto'); // Built-in Node tool, no install needed
 const upload = require('./middleware/upload');
 require('dotenv').config();
 
 const Product = require('./models/Product');
 const Label = require('./models/Label');
+const User = require('./models/User');
 
-// 1. YOU MUST INITIALIZE 'app' BEFORE USING IT!
 const app = express();
 
-// 2. NOW APPLY CORS
-app.use(cors({
-  origin: ['https://frontendforexcelseeds.vercel.app', 'http://localhost:5173'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
-
-// 3. EXPLICIT PREFLIGHT
-app.options('*', cors());
-
-// 4. BODY PARSER
+// 1. SIMPLEST CORS FOR DEPLOYMENT
+app.use(cors());
 app.use(express.json());
 
 // Database Connection
@@ -30,16 +20,16 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("Connected to MongoDB Atlas"))
   .catch(err => console.error("Database Connection Error:", err));
 
-// ... keep the rest of your API routes exactly the same down below ...
 // --- API ROUTES ---
-const User = require('./models/User');
+
+// Health Check (To see if it's alive)
+app.get('/', (req, res) => res.send('Ganga Kaveri Backend is LIVE'));
 
 // LOGIN ROUTE
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   try {
     const user = await User.findOne({ email });
-    // Note: For production, passwords should be hashed using bcrypt
     if (user && user.password === password) {
       res.json({ success: true, message: "Login successful" });
     } else {
@@ -49,60 +39,46 @@ app.post('/api/auth/login', async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-// 1. ADMIN: Create Product & Generate Labels
+
+// ADMIN: Generate Labels
 app.post('/api/admin/generate', upload.single('leaflet'), async (req, res) => {
   try {
     const productData = req.body;
     const quantity = parseInt(productData.quantity);
-    const leafletUrl = req.file.path; // Cloudinary URL
+    const leafletUrl = req.file.path;
 
-    // Create the Product Entry
-    const newProduct = await Product.create({
-      ...productData,
-      leafletUrl
-    });
+    const newProduct = await Product.create({ ...productData, leafletUrl });
 
-    // Generate unique labels (12-char ID like the screenshot)
     const labelsToInsert = [];
     for (let i = 0; i < quantity; i++) {
+      // GENERATE 12-CHAR ID USING NATIVE CRYPTO
+      const randomId = crypto.randomBytes(6).toString('hex').toUpperCase(); 
       labelsToInsert.push({ 
-        _id: nanoid(12).toUpperCase(), 
+        _id: randomId, 
         productId: newProduct._id 
       });
     }
 
     const createdLabels = await Label.insertMany(labelsToInsert);
-
-    res.status(201).json({ 
-      success: true, 
-      labelNumbers: createdLabels.map(label => label._id) 
-    });
-
+    res.status(201).json({ success: true, labelNumbers: createdLabels.map(l => l._id) });
   } catch (error) {
-    console.error("Error:", error);
     res.status(500).json({ error: "Server failed to generate labels" });
   }
 });
 
-// 2. PUBLIC: Customer Verification
+// PUBLIC: Verify
 app.get('/api/verify/:labelNo', async (req, res) => {
   try {
     const labelData = await Label.findById(req.params.labelNo).populate('productId');
-    
-    if (!labelData) {
-      return res.status(404).json({ message: "Invalid QR Code" });
-    }
-
-    res.status(200).json({
-      labelNumber: labelData._id,
-      ...labelData.productId._doc
-    });
+    if (!labelData) return res.status(404).json({ message: "Invalid QR Code" });
+    res.status(200).json({ labelNumber: labelData._id, ...labelData.productId._doc });
   } catch (error) {
     res.status(500).json({ error: "Verification failed" });
   }
 });
 
+// Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server on ${PORT}`));
 
 module.exports = app;
