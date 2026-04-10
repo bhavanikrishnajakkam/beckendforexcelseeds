@@ -76,27 +76,34 @@ app.get('/api/verify/:labelNo', async (req, res) => {
     res.status(500).json({ error: "Verification failed" });
   }
 });
-
-// GET OVERVIEW STATS
+// GET OVERVIEW STATS (REFINED VERSION)
 app.get('/api/admin/stats', async (req, res) => {
   try {
-    // This groups products by packagingDate and sums the quantities
     const stats = await Product.aggregate([
       {
         $group: {
-          _id: "$packagingDate", 
-          totalQuantity: { $sum: { $toInt: "$quantity" } },
-          products: { $push: { name: "$productName", variety: "$variety", qty: "$quantity" } }
+          // This handles both potential naming conventions
+          _id: { $ifNull: ["$packagingDate", "$packaging_date"] }, 
+          totalQuantity: { 
+            $sum: { $convert: { input: "$quantity", to: "int", onError: 0, onNull: 0 } } 
+          },
+          products: { 
+            $push: { 
+              name: { $ifNull: ["$productName", "$product_name"] },
+              variety: "$variety",
+              qty: "$quantity"
+            } 
+          }
         }
       },
       { $sort: { "_id": -1 } } // Show newest first
     ]);
     res.json(stats);
   } catch (error) {
+    console.error("Aggregation Error:", error);
     res.status(500).json({ error: "Failed to fetch dashboard data" });
   }
 });
-
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server on ${PORT}`));
