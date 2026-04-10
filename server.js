@@ -23,7 +23,7 @@ mongoose.connect(process.env.MONGO_URI)
 // --- API ROUTES ---
 
 // Health Check (To see if it's alive)
-app.get('/', (req, res) => res.send('Ganga Kaveri Backend is LIVE'));
+app.get('/', (req, res) => res.send('Excel seeds Backend is LIVE'));
 
 // LOGIN ROUTE
 app.post('/api/auth/login', async (req, res) => {
@@ -74,6 +74,26 @@ app.get('/api/verify/:labelNo', async (req, res) => {
     res.status(200).json({ labelNumber: labelData._id, ...labelData.productId._doc });
   } catch (error) {
     res.status(500).json({ error: "Verification failed" });
+  }
+});
+
+// GET OVERVIEW STATS
+app.get('/api/admin/stats', async (req, res) => {
+  try {
+    // This groups products by packagingDate and sums the quantities
+    const stats = await Product.aggregate([
+      {
+        $group: {
+          _id: "$packagingDate", 
+          totalQuantity: { $sum: { $toInt: "$quantity" } },
+          products: { $push: { name: "$productName", variety: "$variety", qty: "$quantity" } }
+        }
+      },
+      { $sort: { "_id": -1 } } // Show newest first
+    ]);
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch dashboard data" });
   }
 });
 
