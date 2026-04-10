@@ -4,8 +4,18 @@ const cors = require('cors');
 const { nanoid } = require('nanoid');
 const upload = require('./middleware/upload'); // Ensure this file exists
 require('dotenv').config();
+app.use(cors({
+  origin: ['https://frontendforexcelseeds.vercel.app', 'http://localhost:5173'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 
-app.use(cors({ origin: '*' }));
+// 2. Explicitly handle the preflight OPTIONS requests for all routes
+app.options('*', cors());
+
+
+
 const Product = require('./models/Product');
 const Label = require('./models/Label');
 
