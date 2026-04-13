@@ -109,7 +109,17 @@ app.delete('/api/admin/product/:id', async (req, res) => {
     res.status(500).json({ error: "Failed to delete batch" });
   }
 });
-
+// EDIT PRODUCT DETAILS
+app.put('/api/admin/product/:id', async (req, res) => {
+  try {
+    const productId = req.params.id;
+    // Updates the product with whatever new data is sent from the frontend modal
+    await Product.findByIdAndUpdate(productId, req.body);
+    res.json({ success: true, message: "Batch updated successfully" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to update batch" });
+  }
+});
 app.get('/api/admin/stats', async (req, res) => {
   try {
     const stats = await Product.aggregate([
@@ -120,11 +130,15 @@ app.get('/api/admin/stats', async (req, res) => {
           totalQuantity: { $sum: { $toInt: "$quantity" } },
           products: { 
             $push: { 
-              // Pull the exact DB schema field names
-              id: "$_id",
+              id: "$_id",         
               name: "$cropName", 
               variety: "$packedVariety", 
-              qty: "$quantity" 
+              qty: "$quantity",
+              // --- NEW FIELDS ADDED HERE ---
+              date: "$dateOfPackaging",
+              mrp: "$mrp",
+              usp: "$unitSalePrice",
+              netQty: "$netQty"
             } 
           }
         }
