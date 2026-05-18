@@ -40,12 +40,11 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 // ADMIN: Generate Labels
-app.post('/api/admin/generate', upload.single('leaflet'), async (req, res) => {
+// Changed to upload.none() because we are no longer sending a physical file
+app.post('/api/admin/generate', upload.none(), async (req, res) => {
   try {
     const p = req.body;
     
-    if (!req.file) return res.status(400).json({ error: "No PDF uploaded" });
-
     // CRITICAL FIX: Map frontend names to exactly what your DB Model expects
     const productToSave = {
       cropName: p.productName || p.cropName,
@@ -61,7 +60,8 @@ app.post('/api/admin/generate', upload.single('leaflet'), async (req, res) => {
       plantAddress: p.plantAddress,
       producedBy: p.producedBy,
       quantity: parseInt(p.quantity),
-      leafletUrl: req.file.path
+      // Grabs the hardcoded text string you added in the frontend
+      leafletUrl: p.leaflet || "No Leaflet Provided" 
     };
 
     const newProduct = await Product.create(productToSave);
@@ -125,16 +125,15 @@ app.get('/api/admin/stats', async (req, res) => {
     const stats = await Product.aggregate([
       {
         $group: {
-          // Tell MongoDB to group by the exact DB schema field name
           _id: "$dateOfPackaging", 
-          totalQuantity: { $sum: { $toInt: "$quantity" } },
+          // Removed $toInt to stop MongoDB from crashing on old/empty test data
+          totalQuantity: { $sum: "$quantity" }, 
           products: { 
             $push: { 
               id: "$_id",         
               name: "$cropName", 
               variety: "$packedVariety", 
               qty: "$quantity",
-              // --- NEW FIELDS ADDED HERE ---
               date: "$dateOfPackaging",
               mrp: "$mrp",
               usp: "$unitSalePrice",
@@ -151,7 +150,6 @@ app.get('/api/admin/stats', async (req, res) => {
     res.status(500).json({ error: "Stats failed" });
   }
 });
-
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server on ${PORT}`));
 
