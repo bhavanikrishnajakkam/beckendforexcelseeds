@@ -1,31 +1,25 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const crypto = require('crypto'); // Built-in Node tool, no install needed
 const upload = require('./middleware/upload');
 require('dotenv').config();
 
 const Product = require('./models/Product');
 const Label = require('./models/Label');
 const User = require('./models/User');
+const LotSequence = require('./models/LotSequence'); // Imported sequence tracker
 
 const app = express();
 
-// 1. SIMPLEST CORS FOR DEPLOYMENT
 app.use(cors());
 app.use(express.json());
 
-// Database Connection
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("Connected to MongoDB Atlas"))
   .catch(err => console.error("Database Connection Error:", err));
 
-// --- API ROUTES ---
-
-// Health Check (To see if it's alive)
 app.get('/', (req, res) => res.send('Excel seeds Backend is LIVE'));
 
-// LOGIN ROUTE
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -39,13 +33,20 @@ app.post('/api/auth/login', async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-// ADMIN: Generate Labels
-// Changed to upload.none() because we are no longer sending a physical file
+
 app.post('/api/admin/generate', upload.none(), async (req, res) => {
   try {
     const p = req.body;
+    const quantityToGenerate = parseInt(p.quantity);
     
-    // CRITICAL FIX: Map frontend names to exactly what your DB Model expects
+    // 1. Fetch current sequence for this specific lot
+    let sequenceDoc = await LotSequence.findOne({ lotNumber: p.packedLotNumber });
+    let currentNumber = sequenceDoc ? sequenceDoc.lastUsedNumber : 100000; 
+
+    // 2. Calculate the range
+    const startLabel = currentNumber + 1;
+    const endLabel = currentNumber + quantityToGenerate;
+    
     const productToSave = {
       cropName: p.productName || p.cropName,
       packedVariety: p.variety || p.packedVariety,
@@ -59,21 +60,28 @@ app.post('/api/admin/generate', upload.none(), async (req, res) => {
       packedAt: p.packedAt,
       plantAddress: p.plantAddress,
       producedBy: p.producedBy,
-      quantity: parseInt(p.quantity),
-      // Grabs the hardcoded text string you added in the frontend
-      leafletUrl: p.leaflet || "No Leaflet Provided" 
+      quantity: quantityToGenerate,
+      leafletUrl: p.leaflet || "No Leaflet Provided",
+      labelRange: `${startLabel} - ${endLabel}` // Save range directly to DB
     };
 
     const newProduct = await Product.create(productToSave);
 
     const labelsToInsert = [];
-    for (let i = 0; i < productToSave.quantity; i++) {
-      const randomId = crypto.randomBytes(6).toString('hex').toUpperCase(); 
+    for (let i = 0; i < quantityToGenerate; i++) {
+      currentNumber++; 
       labelsToInsert.push({ 
-        _id: randomId, 
+        _id: currentNumber.toString(), 
         productId: newProduct._id 
       });
     }
+
+    // 3. Update the sequence tracker for this lot
+    await LotSequence.updateOne(
+      { lotNumber: productToSave.packedLotNumber },
+      { $set: { lastUsedNumber: currentNumber } },
+      { upsert: true }
+    );
 
     const createdLabels = await Label.insertMany(labelsToInsert);
     res.status(201).json({ success: true, labelNumbers: createdLabels.map(l => l._id) });
@@ -84,7 +92,6 @@ app.post('/api/admin/generate', upload.none(), async (req, res) => {
   }
 });
 
-// PUBLIC: Verify
 app.get('/api/verify/:labelNo', async (req, res) => {
   try {
     const labelData = await Label.findById(req.params.labelNo).populate('productId');
@@ -95,61 +102,54 @@ app.get('/api/verify/:labelNo', async (req, res) => {
   }
 });
 
-// DELETE PRODUCT & ASSOCIATED LABELS
 app.delete('/api/admin/product/:id', async (req, res) => {
   try {
-    const productId = req.params.id;
-    // 1. Delete the product
-    await Product.findByIdAndDelete(productId);
-    // 2. Delete all QR labels associated with it
-    await Label.deleteMany({ productId: productId });
-    
+    await Product.findByIdAndDelete(req.params.id);
+    await Label.deleteMany({ productId: req.params.id });
     res.json({ success: true, message: "Batch and labels deleted" });
   } catch (error) {
     res.status(500).json({ error: "Failed to delete batch" });
   }
 });
-// EDIT PRODUCT DETAILS
+
 app.put('/api/admin/product/:id', async (req, res) => {
   try {
-    const productId = req.params.id;
-    // Updates the product with whatever new data is sent from the frontend modal
-    await Product.findByIdAndUpdate(productId, req.body);
+    await Product.findByIdAndUpdate(req.params.id, req.body);
     res.json({ success: true, message: "Batch updated successfully" });
   } catch (error) {
     res.status(500).json({ error: "Failed to update batch" });
   }
 });
+
+// FLATTENED & PAGINATED STATS
 app.get('/api/admin/stats', async (req, res) => {
   try {
-    const stats = await Product.aggregate([
-      {
-        $group: {
-          _id: "$dateOfPackaging", 
-          // Removed $toInt to stop MongoDB from crashing on old/empty test data
-          totalQuantity: { $sum: "$quantity" }, 
-          products: { 
-            $push: { 
-              id: "$_id",         
-              name: "$cropName", 
-              variety: "$packedVariety", 
-              qty: "$quantity",
-              date: "$dateOfPackaging",
-              mrp: "$mrp",
-              usp: "$unitSalePrice",
-              netQty: "$netQty"
-            } 
-          }
-        }
-      },
-      { $sort: { "_id": -1 } }
-    ]);
-    res.json(stats);
+    const fetchAll = req.query.all === 'true';
+
+    if (fetchAll) {
+      const products = await Product.find().sort({ createdAt: -1 }).lean();
+      return res.json({ products, hasMore: false });
+    }
+
+    const skip = parseInt(req.query.skip) || 0;
+    const limit = parseInt(req.query.limit) || 20;
+
+    const products = await Product.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    res.json({
+      products,
+      hasMore: products.length === limit 
+    });
   } catch (error) {
     console.error("Stats Error:", error);
     res.status(500).json({ error: "Stats failed" });
   }
 });
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server on ${PORT}`));
 
